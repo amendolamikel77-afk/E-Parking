@@ -39,6 +39,20 @@ function statusColor(status: "pending" | "verified" | "disputed") {
   return "#999";
 }
 
+// Map the unbounded raw reliability score to a 0–10 credibility rating.
+// New users start at 5/10; each net vote shifts them ±0.5, clamped to [0, 10].
+function credibilityOutOf10(rawScore: number | null) {
+  if (rawScore == null) return null;
+  const value = 5 + rawScore * 0.5;
+  return Math.min(Math.max(value, 0), 10);
+}
+
+function credibilityColor(score: number) {
+  if (score >= 7) return "#2e7d32";
+  if (score >= 4) return "#f9a825";
+  return "#c62828";
+}
+
 export default function Home() {
   const [session, setSession] = useState<Session | null>(null);
   const [score, setScore] = useState<number | null>(null);
@@ -212,29 +226,82 @@ export default function Home() {
     setDismissedParkIds((prev) => new Set(prev).add(reportId));
   }
 
+  const credibility = credibilityOutOf10(score);
+  const avatarUrl = (session?.user.user_metadata?.avatar_url as string) ?? null;
+  const displayName =
+    (session?.user.user_metadata?.full_name as string) ?? session?.user.email ?? "";
+  const initial = displayName ? displayName.charAt(0).toUpperCase() : "?";
+
   return (
     <main style={{ padding: "2rem", maxWidth: 480, margin: "0 auto" }}>
-      <h1 style={{ textAlign: "center" }}>ParkQuest</h1>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          marginBottom: "1rem",
+        }}
+      >
+        <h1 style={{ margin: 0 }}>ParkQuest</h1>
 
-      <div style={{ textAlign: "center", marginBottom: "1rem" }}>
         {session ? (
-          <span style={{ fontSize: "0.85rem", color: "#555" }}>
-            {session.user.email} · ⭐ {score ?? "…"}{" "}
-            <button
-              onClick={signOut}
-              style={{
-                marginLeft: 8,
-                fontSize: "0.8rem",
-                background: "none",
-                border: "1px solid #ccc",
-                borderRadius: 6,
-                padding: "2px 8px",
-                cursor: "pointer",
-              }}
-            >
-              Sign out
-            </button>
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={avatarUrl}
+                alt={displayName}
+                width={36}
+                height={36}
+                style={{ borderRadius: "50%" }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: "50%",
+                  background: "#1976d2",
+                  color: "white",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontWeight: 600,
+                }}
+              >
+                {initial}
+              </div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2 }}>
+              <span
+                style={{
+                  fontWeight: 700,
+                  fontSize: "0.95rem",
+                  color: credibility != null ? credibilityColor(credibility) : "#555",
+                }}
+              >
+                {credibility != null ? credibility.toFixed(1) : "…"}
+                <span style={{ fontWeight: 400, color: "#999", fontSize: "0.75rem" }}>
+                  {" "}
+                  / 10
+                </span>
+              </span>
+              <button
+                onClick={signOut}
+                style={{
+                  fontSize: "0.7rem",
+                  background: "none",
+                  border: "none",
+                  color: "#999",
+                  padding: 0,
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
         ) : (
           <button
             onClick={signIn}
