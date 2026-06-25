@@ -11,19 +11,30 @@ const userIcon = new L.Icon({
   iconAnchor: [12, 41],
 });
 
-const freeIcon = new L.Icon({
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x-green.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-});
+const TEN_MINUTES_MS = 10 * 60 * 1000;
 
-const takenIcon = new L.Icon({
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x-red.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-});
+function reportIcon(status: "free" | "taken", createdAt: string) {
+  const ageMs = Date.now() - new Date(createdAt).getTime();
+  const ageFraction = Math.min(Math.max(ageMs / TEN_MINUTES_MS, 0), 1);
+  // 1.0 opacity when just reported, fading to 0.25 as it nears expiry.
+  const opacity = 1 - ageFraction * 0.75;
+  const color = status === "free" ? "#2e7d32" : "#c62828";
+
+  return L.divIcon({
+    className: "",
+    html: `<div style="
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: ${color};
+      opacity: ${opacity};
+      border: 2px solid white;
+      box-shadow: 0 0 2px rgba(0,0,0,0.5);
+    "></div>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+  });
+}
 
 type Report = {
   id: string;
@@ -37,6 +48,12 @@ type Props = {
   userPosition: { lat: number; lng: number };
   reports: Report[];
 };
+
+function minutesAgo(isoDate: string) {
+  const minutes = Math.floor((Date.now() - new Date(isoDate).getTime()) / 60000);
+  if (minutes < 1) return "just now";
+  return `${minutes} min ago`;
+}
 
 export default function Map({ userPosition, reports }: Props) {
   return (
@@ -58,9 +75,11 @@ export default function Map({ userPosition, reports }: Props) {
           <Marker
             key={r.id}
             position={[r.lat as number, r.lng as number]}
-            icon={r.status === "free" ? freeIcon : takenIcon}
+            icon={reportIcon(r.status, r.created_at)}
           >
-            <Popup>{r.status === "free" ? "Free" : "Taken"}</Popup>
+            <Popup>
+              {r.status === "free" ? "Free" : "Taken"} — {minutesAgo(r.created_at)}
+            </Popup>
           </Marker>
         ))}
     </MapContainer>
