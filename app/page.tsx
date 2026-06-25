@@ -312,6 +312,12 @@ export default function Home() {
     selectedReport?.user_id ? reporterCredibility[selectedReport.user_id] ?? null : null;
   const selectedReportName =
     selectedReport?.user_id ? reporterNames[selectedReport.user_id] ?? null : null;
+  const selectedReportDistance =
+    selectedReport && userPosition && selectedReport.lat != null && selectedReport.lng != null
+      ? distanceMeters(userPosition, { lat: selectedReport.lat, lng: selectedReport.lng })
+      : null;
+  const canActOnSelected =
+    selectedReportDistance != null && selectedReportDistance <= CONTEST_RANGE_METERS;
 
   return (
     <main className="app-shell">
@@ -502,7 +508,10 @@ export default function Home() {
               >
                 <div className="report-row">
                   <span className="badge">{r.status === "free" ? "🟢 Free" : "🔴 Taken"}</span>
-                  <span className="meta">{ageLabel(r.created_at)}</span>
+                  <span className="meta">
+                    {isMine ? "You" : r.user_id ? reporterNames[r.user_id] ?? "Someone" : "Someone"} ·{" "}
+                    {ageLabel(r.created_at)}
+                  </span>
                   {isMine && (
                     <span
                       className="status-pill"
@@ -532,9 +541,14 @@ export default function Home() {
                           e.stopPropagation();
                           startClaim(r.id);
                         }}
-                        disabled={alreadyVoted}
+                        disabled={alreadyVoted || !canContest}
+                        title={
+                          canContest
+                            ? undefined
+                            : `You must be within ${CONTEST_RANGE_METERS}m to park here`
+                        }
                       >
-                        📷 Parked here
+                        {canContest ? "📷 Parked here" : `Too far (${CONTEST_RANGE_METERS}m)`}
                       </button>
                     )}
                     <button
@@ -600,17 +614,24 @@ export default function Home() {
               </span>
             </div>
             {userId && !selectedReportIsMine && selectedReport.status === "free" && (
-              <button
-                className="btn btn-primary"
-                style={{ width: "100%", marginTop: "1rem" }}
-                onClick={() => {
-                  startClaim(selectedReport.id);
-                  setSelectedReportId(null);
-                }}
-                disabled={myVotedIds.has(selectedReport.id)}
-              >
-                📷 Parked here
-              </button>
+              <>
+                <button
+                  className="btn btn-primary"
+                  style={{ width: "100%", marginTop: "1rem" }}
+                  onClick={() => {
+                    startClaim(selectedReport.id);
+                    setSelectedReportId(null);
+                  }}
+                  disabled={myVotedIds.has(selectedReport.id) || !canActOnSelected}
+                >
+                  📷 Parked here
+                </button>
+                {!canActOnSelected && (
+                  <p className="hint" style={{ textAlign: "center" }}>
+                    You must be within {CONTEST_RANGE_METERS}m to park here.
+                  </p>
+                )}
+              </>
             )}
           </div>
         </div>
