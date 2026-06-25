@@ -35,20 +35,33 @@ create policy "Logged-in users can claim a free spot as taken"
 create table if not exists profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   email text,
+  full_name text,
   reliability_score integer not null default 0,
   created_at timestamptz not null default now()
 );
 alter table profiles enable row level security;
+-- Add full_name for projects created before this column existed.
+alter table profiles add column if not exists full_name text;
 
 drop policy if exists "Anyone can read profiles" on profiles;
 create policy "Anyone can read profiles" on profiles for select using (true);
 
--- Auto-create a profile row whenever a new auth user signs up.
+-- Users may update their own profile (e.g. backfilling their display name).
+drop policy if exists "Users can update their own profile" on profiles;
+create policy "Users can update their own profile"
+  on profiles for update using (auth.uid() = id) with check (auth.uid() = id);
+
+-- Auto-create a profile row whenever a new auth user signs up, capturing the
+-- display name Google provides in the user metadata.
 create or replace function handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.profiles (id, email)
-  values (new.id, new.email)
+  insert into public.profiles (id, email, full_name)
+  values (
+    new.id,
+    new.email,
+    coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name')
+  )
   on conflict (id) do nothing;
   return new;
 end;

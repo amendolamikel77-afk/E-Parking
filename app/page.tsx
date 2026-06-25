@@ -9,13 +9,14 @@ import { getLastSubmitAt, setLastSubmitAt } from "@/lib/device";
 import { distanceMeters, formatDistance } from "@/lib/distance";
 import { fetchVoteCounts, fetchMyVotedReportIds, reportStatus, VoteCounts } from "@/lib/votes";
 import { credibilityOutOf10, credibilityColor } from "@/lib/credibility";
-import { fetchReliabilityScores } from "@/lib/profiles";
+import { fetchReliabilityScores, fetchProfileNames } from "@/lib/profiles";
 
 const Map = dynamic(() => import("./Map"), { ssr: false });
 
 const DEFAULT_LOCATION = "Main St Lot";
 const LOCATION_STORAGE_KEY = "parkquest_location";
 const REPORT_LIFETIME_MS = 30 * 60 * 1000;
+const CONTEST_RANGE_METERS = 40;
 const THROTTLE_MS = 60 * 1000;
 const PHOTO_BUCKET = "parking-photos";
 
@@ -67,6 +68,7 @@ export default function Home() {
   const [reporterCredibility, setReporterCredibility] = useState<Record<string, number | null>>(
     {}
   );
+  const [reporterNames, setReporterNames] = useState<Record<string, string>>({});
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [mapFocus, setMapFocus] = useState<{ lat: number; lng: number; key: number } | null>(null);
   const mapWrapRef = useRef<HTMLDivElement | null>(null);
@@ -92,6 +94,14 @@ export default function Home() {
       // choke on stale auth params.
       if (s && (window.location.hash.includes("access_token") || window.location.search.includes("code="))) {
         window.history.replaceState({}, "", window.location.pathname);
+      }
+      // Backfill the display name on this profile so others see who reported.
+      const name =
+        (s?.user.user_metadata?.full_name as string) ??
+        (s?.user.user_metadata?.name as string) ??
+        null;
+      if (s && name) {
+        supabase.from("profiles").update({ full_name: name }).eq("id", s.user.id).then(() => {});
       }
     });
     return () => sub.subscription.unsubscribe();
@@ -162,12 +172,14 @@ export default function Home() {
     setVoteCounts(await fetchVoteCounts(ids));
     setMyVotedIds(userId ? await fetchMyVotedReportIds(userId, ids) : new Set());
 
-    const scores = await fetchReliabilityScores(loaded.map((r) => r.user_id).filter(Boolean) as string[]);
+    const reporterIds = loaded.map((r) => r.user_id).filter(Boolean) as string[];
+    const scores = await fetchReliabilityScores(reporterIds);
     const credibility: Record<string, number | null> = {};
     for (const [id, rawScore] of Object.entries(scores)) {
       credibility[id] = credibilityOutOf10(rawScore);
     }
     setReporterCredibility(credibility);
+    setReporterNames(await fetchProfileNames(reporterIds));
   }
 
   async function loadMyReports() {
@@ -298,6 +310,8 @@ export default function Home() {
     selectedReport != null && selectedReport.user_id != null && selectedReport.user_id === userId;
   const selectedReportCredibility =
     selectedReport?.user_id ? reporterCredibility[selectedReport.user_id] ?? null : null;
+  const selectedReportName =
+    selectedReport?.user_id ? reporterNames[selectedReport.user_id] ?? null : null;
 
   return (
     <main className="app-shell">
@@ -474,6 +488,11 @@ export default function Home() {
             const isMine = r.user_id != null && r.user_id === userId;
             const counts = voteCounts[r.id];
             const alreadyVoted = myVotedIds.has(r.id);
+            const reportDistance =
+              userPosition && r.lat != null && r.lng != null
+                ? distanceMeters(userPosition, { lat: r.lat, lng: r.lng })
+                : null;
+            const canContest = reportDistance != null && reportDistance <= CONTEST_RANGE_METERS;
             return (
               <div
                 key={r.id}
@@ -524,9 +543,14 @@ export default function Home() {
                         e.stopPropagation();
                         castVote(r.id, "dispute");
                       }}
-                      disabled={alreadyVoted}
+                      disabled={alreadyVoted || !canContest}
+                      title={
+                        canContest
+                          ? undefined
+                          : `You must be within ${CONTEST_RANGE_METERS}m to contest this spot`
+                      }
                     >
-                      Not accurate 👎
+                      {canContest ? "Not accurate 👎" : `Too far to contest (${CONTEST_RANGE_METERS}m)`}
                     </button>
                   </div>
                 )}
@@ -545,6 +569,10 @@ export default function Home() {
             <h2 style={{ marginBottom: "0.75rem" }}>
               {selectedReport.status === "free" ? "🟢 Free spot" : "🔴 Taken spot"}
             </h2>
+            <div className="detail-row">
+              <span className="meta">Reported by</span>
+              <span>{selectedReportIsMine ? "You" : selectedReportName ?? "Someone"}</span>
+            </div>
             <div className="detail-row">
               <span className="meta">Reported</span>
               <span>{ageLabel(selectedReport.created_at)}</span>
