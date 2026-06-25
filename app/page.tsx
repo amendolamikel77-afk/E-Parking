@@ -138,6 +138,7 @@ export default function Home() {
       .from("reports")
       .select("id, status, created_at, lat, lng, user_id")
       .eq("location_label", locationLabel)
+      .eq("status", "free")
       .gte("created_at", cutoff)
       .order("created_at", { ascending: false })
       .limit(10);
