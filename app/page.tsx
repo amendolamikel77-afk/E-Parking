@@ -6,6 +6,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { getLastSubmitAt, setLastSubmitAt } from "@/lib/device";
 import { distanceMeters, formatDistance } from "@/lib/distance";
+import { fetchVoteCounts, fetchMyVotedReportIds, reportStatus, VoteCounts } from "@/lib/votes";
 
 const Map = dynamic(() => import("./Map"), { ssr: false });
 
@@ -31,11 +32,21 @@ function minutesAgo(isoDate: string) {
   return `${minutes} min ago`;
 }
 
+function statusColor(status: "pending" | "verified" | "disputed") {
+  if (status === "verified") return "#2e7d32";
+  if (status === "disputed") return "#c62828";
+  return "#999";
+}
+
 export default function Home() {
   const [session, setSession] = useState<Session | null>(null);
   const [score, setScore] = useState<number | null>(null);
   const [location, setLocation] = useState(DEFAULT_LOCATION);
   const [reports, setReports] = useState<Report[]>([]);
+  const [voteCounts, setVoteCounts] = useState<VoteCounts>({});
+  const [myVotedIds, setMyVotedIds] = useState<Set<string>>(new Set());
+  const [myReports, setMyReports] = useState<Report[]>([]);
+  const [myReportVoteCounts, setMyReportVoteCounts] = useState<VoteCounts>({});
   const [submitting, setSubmitting] = useState(false);
   const [userPosition, setUserPosition] = useState<UserPosition | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
@@ -56,17 +67,21 @@ export default function Home() {
     if (saved) setLocation(saved);
   }, []);
 
-  useEffect(() => {
+  async function refreshScore() {
     if (!userId) {
       setScore(null);
       return;
     }
-    supabase
+    const { data } = await supabase
       .from("profiles")
       .select("reliability_score")
       .eq("id", userId)
-      .single()
-      .then(({ data }) => setScore(data?.reliability_score ?? 0));
+      .single();
+    setScore(data?.reliability_score ?? 0);
+  }
+
+  useEffect(() => {
+    refreshScore();
   }, [userId]);
 
   useEffect(() => {
@@ -97,14 +112,37 @@ export default function Home() {
       .gte("created_at", cutoff)
       .order("created_at", { ascending: false })
       .limit(10);
-    setReports(data ?? []);
+    const loaded = data ?? [];
+    setReports(loaded);
+
+    const ids = loaded.map((r) => r.id);
+    setVoteCounts(await fetchVoteCounts(ids));
+    setMyVotedIds(userId ? await fetchMyVotedReportIds(userId, ids) : new Set());
+  }
+
+  async function loadMyReports() {
+    if (!userId) {
+      setMyReports([]);
+      setMyReportVoteCounts({});
+      return;
+    }
+    const { data } = await supabase
+      .from("reports")
+      .select("id, status, created_at, lat, lng, user_id")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    const loaded = data ?? [];
+    setMyReports(loaded);
+    setMyReportVoteCounts(await fetchVoteCounts(loaded.map((r) => r.id)));
   }
 
   useEffect(() => {
     loadReports(location);
+    loadMyReports();
     const last = getLastSubmitAt(location);
     if (last) setCooldownUntil(last + THROTTLE_MS);
-  }, [location]);
+  }, [location, userId]);
 
   function changeLocation(next: string) {
     setLocation(next);
@@ -138,7 +176,15 @@ export default function Home() {
     setLastSubmitAt(location, now);
     setCooldownUntil(now + THROTTLE_MS);
     await loadReports(location);
+    await loadMyReports();
     setSubmitting(false);
+  }
+
+  async function castVote(reportId: string, vote: "confirm" | "dispute") {
+    if (!userId || myVotedIds.has(reportId)) return;
+    await supabase.from("report_votes").insert({ report_id: reportId, voter_id: userId, vote });
+    setMyVotedIds((prev) => new Set(prev).add(reportId));
+    setVoteCounts(await fetchVoteCounts(reports.map((r) => r.id)));
   }
 
   return (
@@ -255,31 +301,98 @@ export default function Home() {
         </div>
       )}
 
+      {userId && myReports.length > 0 && (
+        <>
+          <h2 style={{ fontSize: "1rem", color: "#555" }}>My recent reports</h2>
+          <ul style={{ listStyle: "none", padding: 0, marginBottom: "1.5rem" }}>
+            {myReports.map((r) => {
+              const status = reportStatus(myReportVoteCounts[r.id]);
+              return (
+                <li
+                  key={r.id}
+                  style={{
+                    padding: "0.5rem",
+                    marginBottom: 6,
+                    borderRadius: 6,
+                    background: `${statusColor(status)}1a`,
+                    borderLeft: `4px solid ${statusColor(status)}`,
+                  }}
+                >
+                  {r.status === "free" ? "🟢 Free" : "🔴 Taken"} — {minutesAgo(r.created_at)} —{" "}
+                  <strong style={{ color: statusColor(status) }}>{status}</strong>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+
       <h2 style={{ fontSize: "1rem", color: "#555" }}>Recent reports</h2>
       {reports.length === 0 ? (
         <p style={{ color: "#888" }}>No reports in the last 10 minutes.</p>
       ) : (
         <ul style={{ listStyle: "none", padding: 0 }}>
-          {reports.map((r) => (
-            <li
-              key={r.id}
-              style={{
-                padding: "0.5rem 0",
-                borderBottom: "1px solid #eee",
-              }}
-            >
-              {r.status === "free" ? "🟢 Free" : "🔴 Taken"} — {minutesAgo(r.created_at)}
-              {r.user_id && r.user_id === userId && (
-                <span style={{ color: "#9c27b0" }}> (you)</span>
-              )}
-              {userPosition && r.lat != null && r.lng != null && (
-                <span style={{ color: "#aaa" }}>
-                  {" — "}
-                  {formatDistance(distanceMeters(userPosition, { lat: r.lat, lng: r.lng }))}
-                </span>
-              )}
-            </li>
-          ))}
+          {reports.map((r) => {
+            const isMine = r.user_id != null && r.user_id === userId;
+            const counts = voteCounts[r.id];
+            const alreadyVoted = myVotedIds.has(r.id);
+            return (
+              <li
+                key={r.id}
+                style={{
+                  padding: "0.5rem 0",
+                  borderBottom: "1px solid #eee",
+                }}
+              >
+                <div>
+                  {r.status === "free" ? "🟢 Free" : "🔴 Taken"} — {minutesAgo(r.created_at)}
+                  {isMine && <span style={{ color: "#9c27b0" }}> (you)</span>}
+                  {userPosition && r.lat != null && r.lng != null && (
+                    <span style={{ color: "#aaa" }}>
+                      {" — "}
+                      {formatDistance(distanceMeters(userPosition, { lat: r.lat, lng: r.lng }))}
+                    </span>
+                  )}
+                </div>
+                {counts && (counts.confirm > 0 || counts.dispute > 0) && (
+                  <div style={{ fontSize: "0.75rem", color: "#888" }}>
+                    👍 {counts.confirm} · 👎 {counts.dispute}
+                  </div>
+                )}
+                {userId && !isMine && (
+                  <div style={{ marginTop: 4 }}>
+                    <button
+                      onClick={() => castVote(r.id, "confirm")}
+                      disabled={alreadyVoted}
+                      style={{
+                        marginRight: 6,
+                        fontSize: "0.75rem",
+                        padding: "2px 8px",
+                        border: "1px solid #ccc",
+                        borderRadius: 6,
+                        background: alreadyVoted ? "#eee" : "white",
+                      }}
+                    >
+                      Still there 👍
+                    </button>
+                    <button
+                      onClick={() => castVote(r.id, "dispute")}
+                      disabled={alreadyVoted}
+                      style={{
+                        fontSize: "0.75rem",
+                        padding: "2px 8px",
+                        border: "1px solid #ccc",
+                        borderRadius: 6,
+                        background: alreadyVoted ? "#eee" : "white",
+                      }}
+                    >
+                      Not accurate 👎
+                    </button>
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>
