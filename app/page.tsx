@@ -9,12 +9,13 @@ import { getLastSubmitAt, setLastSubmitAt } from "@/lib/device";
 import { distanceMeters, formatDistance } from "@/lib/distance";
 import { fetchVoteCounts, fetchMyVotedReportIds, reportStatus, VoteCounts } from "@/lib/votes";
 import { credibilityOutOf10, credibilityColor } from "@/lib/credibility";
+import { fetchReliabilityScores } from "@/lib/profiles";
 
 const Map = dynamic(() => import("./Map"), { ssr: false });
 
 const DEFAULT_LOCATION = "Main St Lot";
 const LOCATION_STORAGE_KEY = "parkquest_location";
-const TEN_MINUTES_MS = 10 * 60 * 1000;
+const REPORT_LIFETIME_MS = 60 * 1000;
 const THROTTLE_MS = 60 * 1000;
 const PHOTO_BUCKET = "parking-photos";
 
@@ -29,10 +30,13 @@ type Report = {
 
 type UserPosition = { lat: number; lng: number };
 
-function minutesAgo(isoDate: string) {
-  const minutes = Math.floor((Date.now() - new Date(isoDate).getTime()) / 60000);
-  if (minutes < 1) return "just now";
-  return `${minutes} min ago`;
+function ageLabel(isoDate: string) {
+  const seconds = Math.floor((Date.now() - new Date(isoDate).getTime()) / 1000);
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  return `${Math.floor(minutes / 60)}h ago`;
 }
 
 function statusPill(status: "pending" | "verified" | "disputed") {
@@ -41,6 +45,15 @@ function statusPill(status: "pending" | "verified" | "disputed") {
   if (status === "disputed")
     return { label: "Disputed", bg: "var(--red-soft)", color: "var(--red)" };
   return { label: "Pending", bg: "#eef2f7", color: "var(--text-soft)" };
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(",")[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 export default function Home() {
@@ -59,6 +72,11 @@ export default function Home() {
   const [claimingReportId, setClaimingReportId] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
+  const [reporterCredibility, setReporterCredibility] = useState<Record<string, number | null>>(
+    {}
+  );
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [, forceTick] = useState(0);
 
   const userId = session?.user.id ?? null;
 
@@ -73,6 +91,12 @@ export default function Home() {
   useEffect(() => {
     const saved = localStorage.getItem(LOCATION_STORAGE_KEY);
     if (saved) setLocation(saved);
+  }, []);
+
+  // Re-render periodically so marker opacity / "Xs ago" labels stay live.
+  useEffect(() => {
+    const id = setInterval(() => forceTick((t) => t + 1), 5000);
+    return () => clearInterval(id);
   }, []);
 
   async function refreshScore() {
@@ -113,7 +137,7 @@ export default function Home() {
   }, []);
 
   async function loadReports(locationLabel: string) {
-    const cutoff = new Date(Date.now() - TEN_MINUTES_MS).toISOString();
+    const cutoff = new Date(Date.now() - REPORT_LIFETIME_MS).toISOString();
     const { data } = await supabase
       .from("reports")
       .select("id, status, created_at, lat, lng, user_id")
@@ -127,6 +151,13 @@ export default function Home() {
     const ids = loaded.map((r) => r.id);
     setVoteCounts(await fetchVoteCounts(ids));
     setMyVotedIds(userId ? await fetchMyVotedReportIds(userId, ids) : new Set());
+
+    const scores = await fetchReliabilityScores(loaded.map((r) => r.user_id).filter(Boolean) as string[]);
+    const credibility: Record<string, number | null> = {};
+    for (const [id, rawScore] of Object.entries(scores)) {
+      credibility[id] = credibilityOutOf10(rawScore);
+    }
+    setReporterCredibility(credibility);
   }
 
   async function loadMyReports() {
@@ -151,6 +182,12 @@ export default function Home() {
     loadMyReports();
     const last = getLastSubmitAt(location);
     if (last) setCooldownUntil(last + THROTTLE_MS);
+  }, [location, userId]);
+
+  // Reports expire after just 60s, so keep the feed fresh without a manual reload.
+  useEffect(() => {
+    const id = setInterval(() => loadReports(location), 15000);
+    return () => clearInterval(id);
   }, [location, userId]);
 
   function changeLocation(next: string) {
@@ -207,6 +244,28 @@ export default function Home() {
     setUploadingPhoto(true);
     setClaimError(null);
     try {
+      const base64 = await fileToBase64(file);
+      const verifyRes = await fetch("/api/verify-photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: base64,
+          mimeType: file.type || "image/jpeg",
+          voterId: userId,
+        }),
+      });
+      const verification = await verifyRes.json();
+
+      if (!verification.valid) {
+        setClaimError(
+          `That doesn't look like a valid parking spot${
+            verification.reason ? `: ${verification.reason}` : ""
+          }. -1 credibility.`
+        );
+        await refreshScore();
+        return;
+      }
+
       const path = `${reportId}/${userId}-${Date.now()}.jpg`;
       const { error: uploadError } = await supabase.storage
         .from(PHOTO_BUCKET)
@@ -239,6 +298,16 @@ export default function Home() {
     (session?.user.user_metadata?.full_name as string) ?? session?.user.email ?? "";
   const initial = displayName ? displayName.charAt(0).toUpperCase() : "?";
 
+  const allKnownReports = [...reports, ...myReports];
+  const selectedReport = selectedReportId
+    ? allKnownReports.find((r) => r.id === selectedReportId) ?? null
+    : null;
+  const selectedReportCounts = selectedReportId ? voteCounts[selectedReportId] : undefined;
+  const selectedReportIsMine =
+    selectedReport != null && selectedReport.user_id != null && selectedReport.user_id === userId;
+  const selectedReportCredibility =
+    selectedReport?.user_id ? reporterCredibility[selectedReport.user_id] ?? null : null;
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -250,10 +319,7 @@ export default function Home() {
         {session ? (
           <Link href="/profile" className="chip">
             {credibility != null && (
-              <span
-                className="chip-score"
-                style={{ color: credibilityColor(credibility) }}
-              >
+              <span className="chip-score" style={{ color: credibilityColor(credibility) }}>
                 {credibility.toFixed(1)}
               </span>
             )}
@@ -284,7 +350,9 @@ export default function Home() {
         />
         <p className="hint">
           {userPosition ? (
-            <>📍 Located — {userPosition.lat.toFixed(5)}, {userPosition.lng.toFixed(5)}</>
+            <>
+              📍 Located — {userPosition.lat.toFixed(5)}, {userPosition.lng.toFixed(5)}
+            </>
           ) : locationError ? (
             <>⚠️ Location unavailable: {locationError}</>
           ) : (
@@ -299,10 +367,11 @@ export default function Home() {
         <section className="card prompt fade-in">
           <strong>📷 Confirm you parked here</strong>
           <span className="meta">
-            Take a quick photo to verify the spot — this gives the reporter credibility points.
+            Take a quick photo to verify the spot — our AI checks it actually looks like
+            parking before the reporter gets credibility points.
           </span>
           <label className="btn btn-primary" style={{ display: "inline-block" }}>
-            {uploadingPhoto ? "Uploading…" : "Take / choose photo"}
+            {uploadingPhoto ? "Checking photo…" : "Take / choose photo"}
             <input
               type="file"
               accept="image/*"
@@ -315,7 +384,9 @@ export default function Home() {
               }}
             />
           </label>
-          {claimError && <span style={{ color: "var(--red)", fontSize: "0.85rem" }}>{claimError}</span>}
+          {claimError && (
+            <span style={{ color: "var(--red)", fontSize: "0.85rem" }}>{claimError}</span>
+          )}
           <button className="btn btn-ghost" onClick={cancelClaim} disabled={uploadingPhoto}>
             Cancel
           </button>
@@ -333,7 +404,11 @@ export default function Home() {
             Spot Free
           </button>
         </div>
-        {!userId && <p className="hint" style={{ textAlign: "center" }}>Sign in to report a spot.</p>}
+        {!userId && (
+          <p className="hint" style={{ textAlign: "center" }}>
+            Sign in to report a spot.
+          </p>
+        )}
         {userId && onCooldown && (
           <p className="hint" style={{ textAlign: "center" }}>
             You just reported here — try again in a minute.
@@ -343,7 +418,14 @@ export default function Home() {
 
       {userPosition && (
         <div className="map-wrap fade-in">
-          <Map userPosition={userPosition} reports={reports} userId={userId} />
+          <Map
+            userPosition={userPosition}
+            reports={reports}
+            userId={userId}
+            reporterCredibility={reporterCredibility}
+            lifetimeMs={REPORT_LIFETIME_MS}
+            onSelectReport={setSelectedReportId}
+          />
         </div>
       )}
 
@@ -354,12 +436,15 @@ export default function Home() {
             const status = reportStatus(myReportVoteCounts[r.id]);
             const pill = statusPill(status);
             return (
-              <div key={r.id} className="report-item">
+              <div
+                key={r.id}
+                className="report-item"
+                onClick={() => setSelectedReportId(r.id)}
+                style={{ cursor: "pointer" }}
+              >
                 <div className="report-row">
-                  <span className="badge">
-                    {r.status === "free" ? "🟢 Free" : "🔴 Taken"}
-                  </span>
-                  <span className="meta">{minutesAgo(r.created_at)}</span>
+                  <span className="badge">{r.status === "free" ? "🟢 Free" : "🔴 Taken"}</span>
+                  <span className="meta">{ageLabel(r.created_at)}</span>
                   <span
                     className="status-pill"
                     style={{ background: pill.bg, color: pill.color, marginLeft: "auto" }}
@@ -376,21 +461,27 @@ export default function Home() {
       <section className="card">
         <h2 className="card-title">Recent reports nearby</h2>
         {reports.length === 0 ? (
-          <p className="empty">No reports in the last 10 minutes.</p>
+          <p className="empty">No reports in the last minute.</p>
         ) : (
           reports.map((r) => {
             const isMine = r.user_id != null && r.user_id === userId;
             const counts = voteCounts[r.id];
             const alreadyVoted = myVotedIds.has(r.id);
             return (
-              <div key={r.id} className="report-item">
+              <div
+                key={r.id}
+                className="report-item"
+                onClick={() => setSelectedReportId(r.id)}
+                style={{ cursor: "pointer" }}
+              >
                 <div className="report-row">
-                  <span className="badge">
-                    {r.status === "free" ? "🟢 Free" : "🔴 Taken"}
-                  </span>
-                  <span className="meta">{minutesAgo(r.created_at)}</span>
+                  <span className="badge">{r.status === "free" ? "🟢 Free" : "🔴 Taken"}</span>
+                  <span className="meta">{ageLabel(r.created_at)}</span>
                   {isMine && (
-                    <span className="status-pill" style={{ background: "var(--primary-soft)", color: "var(--primary-dark)" }}>
+                    <span
+                      className="status-pill"
+                      style={{ background: "var(--primary-soft)", color: "var(--primary-dark)" }}
+                    >
                       You
                     </span>
                   )}
@@ -411,7 +502,10 @@ export default function Home() {
                       <button
                         className="btn-vote"
                         style={{ color: "var(--primary-dark)", borderColor: "var(--primary)" }}
-                        onClick={() => startClaim(r.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startClaim(r.id);
+                        }}
                         disabled={alreadyVoted}
                       >
                         📷 Parked here
@@ -419,7 +513,10 @@ export default function Home() {
                     )}
                     <button
                       className="btn-vote"
-                      onClick={() => castVote(r.id, "dispute")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        castVote(r.id, "dispute");
+                      }}
                       disabled={alreadyVoted}
                     >
                       Not accurate 👎
@@ -431,6 +528,58 @@ export default function Home() {
           })
         )}
       </section>
+
+      {selectedReport && (
+        <div className="modal-backdrop" onClick={() => setSelectedReportId(null)}>
+          <div className="card modal-card" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setSelectedReportId(null)}>
+              ✕
+            </button>
+            <h2 style={{ marginBottom: "0.75rem" }}>
+              {selectedReport.status === "free" ? "🟢 Free spot" : "🔴 Taken spot"}
+            </h2>
+            <div className="detail-row">
+              <span className="meta">Reported</span>
+              <span>{ageLabel(selectedReport.created_at)}</span>
+            </div>
+            <div className="detail-row">
+              <span className="meta">Reporter credibility</span>
+              <span style={{ color: selectedReportCredibility != null ? credibilityColor(selectedReportCredibility) : undefined }}>
+                {selectedReportCredibility != null ? `${selectedReportCredibility.toFixed(1)} / 10` : "—"}
+              </span>
+            </div>
+            {userPosition && selectedReport.lat != null && selectedReport.lng != null && (
+              <div className="detail-row">
+                <span className="meta">Distance</span>
+                <span>
+                  {formatDistance(
+                    distanceMeters(userPosition, { lat: selectedReport.lat, lng: selectedReport.lng })
+                  )}
+                </span>
+              </div>
+            )}
+            <div className="detail-row">
+              <span className="meta">Votes</span>
+              <span>
+                👍 {selectedReportCounts?.confirm ?? 0} · 👎 {selectedReportCounts?.dispute ?? 0}
+              </span>
+            </div>
+            {userId && !selectedReportIsMine && selectedReport.status === "free" && (
+              <button
+                className="btn btn-primary"
+                style={{ width: "100%", marginTop: "1rem" }}
+                onClick={() => {
+                  startClaim(selectedReport.id);
+                  setSelectedReportId(null);
+                }}
+                disabled={myVotedIds.has(selectedReport.id)}
+              >
+                📷 Parked here
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </main>
   );
 }
