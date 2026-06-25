@@ -4,6 +4,7 @@ create table reports (
   location_label text not null default 'Main St Lot',
   lat double precision,
   lng double precision,
+  reporter_id text,
   created_at timestamptz not null default now()
 );
 
@@ -20,3 +21,6 @@ create policy "Anyone can insert reports"
 -- Migration for existing tables created before lat/lng existed:
 -- alter table reports add column lat double precision;
 -- alter table reports add column lng double precision;
+
+-- Migration for existing tables created before reporter_id existed:
+-- alter table reports add column reporter_id text;
