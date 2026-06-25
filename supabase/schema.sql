@@ -61,7 +61,7 @@ create table report_votes (
   id uuid primary key default gen_random_uuid(),
   report_id uuid not null references reports (id) on delete cascade,
   voter_id uuid not null references auth.users (id),
-  vote text not null check (vote in ('confirm', 'dispute')),
+  vote text not null check (vote in ('confirm', 'dispute', 'parked_confirm')),
   created_at timestamptz not null default now(),
   unique (report_id, voter_id)
 );
@@ -91,7 +91,11 @@ begin
   if report_owner is null or report_owner = new.voter_id then
     return new;
   end if;
-  delta := case when new.vote = 'confirm' then 1 else -1 end;
+  delta := case
+    when new.vote = 'confirm' then 1
+    when new.vote = 'parked_confirm' then 2
+    else -1
+  end;
   update profiles set reliability_score = reliability_score + delta where id = report_owner;
   return new;
 end;
@@ -121,3 +125,10 @@ create trigger on_report_vote_created
 --
 -- -- Then create the report_votes table, its policies, the handle_new_vote
 -- -- function, and the on_report_vote_created trigger exactly as defined above.
+--
+-- -- If you already created report_votes before 'parked_confirm' existed:
+-- alter table report_votes drop constraint report_votes_vote_check;
+-- alter table report_votes add constraint report_votes_vote_check
+--   check (vote in ('confirm', 'dispute', 'parked_confirm'));
+-- -- Then re-run "create or replace function handle_new_vote" with the updated
+-- -- delta logic above (CREATE OR REPLACE is safe to re-run).

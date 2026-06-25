@@ -12,7 +12,8 @@ export async function fetchVoteCounts(reportIds: string[]): Promise<VoteCounts> 
   const counts: VoteCounts = {};
   for (const row of data ?? []) {
     if (!counts[row.report_id]) counts[row.report_id] = { confirm: 0, dispute: 0 };
-    counts[row.report_id][row.vote as "confirm" | "dispute"]++;
+    if (row.vote === "dispute") counts[row.report_id].dispute++;
+    else counts[row.report_id].confirm++; // confirm and parked_confirm both count as a 👍
   }
   return counts;
 }

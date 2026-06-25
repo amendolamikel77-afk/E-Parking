@@ -14,6 +14,7 @@ const DEFAULT_LOCATION = "Main St Lot";
 const LOCATION_STORAGE_KEY = "parkquest_location";
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 const THROTTLE_MS = 60 * 1000;
+const NEARBY_RADIUS_METERS = 30;
 
 type Report = {
   id: string;
@@ -51,6 +52,7 @@ export default function Home() {
   const [userPosition, setUserPosition] = useState<UserPosition | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  const [dismissedParkIds, setDismissedParkIds] = useState<Set<string>>(new Set());
 
   const userId = session?.user.id ?? null;
 
@@ -89,7 +91,7 @@ export default function Home() {
       setLocationError("Geolocation is not supported by this browser.");
       return;
     }
-    navigator.geolocation.getCurrentPosition(
+    const watchId = navigator.geolocation.watchPosition(
       (position) => {
         setUserPosition({
           lat: position.coords.latitude,
@@ -101,6 +103,7 @@ export default function Home() {
       },
       { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
     );
+    return () => navigator.geolocation.clearWatch(watchId);
   }, []);
 
   async function loadReports(locationLabel: string) {
@@ -180,11 +183,33 @@ export default function Home() {
     setSubmitting(false);
   }
 
-  async function castVote(reportId: string, vote: "confirm" | "dispute") {
+  async function castVote(reportId: string, vote: "confirm" | "dispute" | "parked_confirm") {
     if (!userId || myVotedIds.has(reportId)) return;
     await supabase.from("report_votes").insert({ report_id: reportId, voter_id: userId, vote });
     setMyVotedIds((prev) => new Set(prev).add(reportId));
     setVoteCounts(await fetchVoteCounts(reports.map((r) => r.id)));
+  }
+
+  const nearbyReportToConfirm =
+    userId && userPosition
+      ? reports.find(
+          (r) =>
+            r.lat != null &&
+            r.lng != null &&
+            r.user_id !== userId &&
+            !myVotedIds.has(r.id) &&
+            !dismissedParkIds.has(r.id) &&
+            distanceMeters(userPosition, { lat: r.lat, lng: r.lng }) <= NEARBY_RADIUS_METERS
+        ) ?? null
+      : null;
+
+  async function confirmParkedHere(reportId: string) {
+    await castVote(reportId, "parked_confirm");
+    setDismissedParkIds((prev) => new Set(prev).add(reportId));
+  }
+
+  function dismissParkedPrompt(reportId: string) {
+    setDismissedParkIds((prev) => new Set(prev).add(reportId));
   }
 
   return (
@@ -249,6 +274,47 @@ export default function Home() {
           ? `Location unavailable: ${locationError}`
           : "Getting your location..."}
       </p>
+
+      {nearbyReportToConfirm && (
+        <div
+          style={{
+            margin: "1rem 0",
+            padding: "0.75rem",
+            border: "1px solid #ffb300",
+            background: "#fff8e1",
+            borderRadius: 8,
+            textAlign: "center",
+          }}
+        >
+          <p style={{ margin: "0 0 0.5rem" }}>Did you park here?</p>
+          <button
+            onClick={() => confirmParkedHere(nearbyReportToConfirm.id)}
+            style={{
+              marginRight: 8,
+              padding: "0.4rem 0.8rem",
+              border: "none",
+              borderRadius: 6,
+              background: "#2e7d32",
+              color: "white",
+              cursor: "pointer",
+            }}
+          >
+            Yes
+          </button>
+          <button
+            onClick={() => dismissParkedPrompt(nearbyReportToConfirm.id)}
+            style={{
+              padding: "0.4rem 0.8rem",
+              border: "1px solid #ccc",
+              borderRadius: 6,
+              background: "white",
+              cursor: "pointer",
+            }}
+          >
+            No
+          </button>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: "1rem", margin: "2rem 0" }}>
         <button
