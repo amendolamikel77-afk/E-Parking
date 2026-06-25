@@ -18,9 +18,31 @@ function minutesAgo(isoDate: string) {
   return `${minutes} min ago`;
 }
 
+type UserPosition = { lat: number; lng: number };
+
 export default function Home() {
   const [reports, setReports] = useState<Report[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [userPosition, setUserPosition] = useState<UserPosition | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setLocationError("Geolocation is not supported by this browser.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setUserPosition({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+      },
+      (error) => {
+        setLocationError(error.message);
+      }
+    );
+  }, []);
 
   async function loadReports() {
     const cutoff = new Date(Date.now() - TEN_MINUTES_MS).toISOString();
@@ -49,6 +71,13 @@ export default function Home() {
     <main style={{ padding: "2rem", maxWidth: 480, margin: "0 auto" }}>
       <h1 style={{ textAlign: "center" }}>ParkQuest</h1>
       <p style={{ textAlign: "center", color: "#555" }}>{LOCATION}</p>
+      <p style={{ textAlign: "center", color: "#888", fontSize: "0.85rem" }}>
+        {userPosition
+          ? `Your position: ${userPosition.lat.toFixed(5)}, ${userPosition.lng.toFixed(5)}`
+          : locationError
+          ? `Location unavailable: ${locationError}`
+          : "Getting your location..."}
+      </p>
 
       <div style={{ display: "flex", gap: "1rem", margin: "2rem 0" }}>
         <button
