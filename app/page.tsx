@@ -63,6 +63,7 @@ export default function Home() {
   const [claimingReportId, setClaimingReportId] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
+  const [claimSuccess, setClaimSuccess] = useState<string | null>(null);
   const [reporterCredibility, setReporterCredibility] = useState<Record<string, number | null>>(
     {}
   );
@@ -228,6 +229,7 @@ export default function Home() {
 
   function startClaim(reportId: string) {
     setClaimError(null);
+    setClaimSuccess(null);
     setClaimingReportId(reportId);
   }
 
@@ -260,6 +262,8 @@ export default function Home() {
       setMyVotedIds((prev) => new Set(prev).add(reportId));
       await loadReports(location);
       setClaimingReportId(null);
+      setClaimSuccess("Spot taken — thanks! 🚗 Removed from the map.");
+      setTimeout(() => setClaimSuccess(null), 4000);
     } catch {
       setClaimError("Couldn't upload that photo. Try again.");
     } finally {
@@ -342,11 +346,11 @@ export default function Home() {
         <section className="card prompt fade-in">
           <strong>📷 Confirm you parked here</strong>
           <span className="meta">
-            Take a quick photo to verify the spot — our AI checks it actually looks like
-            parking before the reporter gets credibility points.
+            Snap a quick photo to confirm the spot. This upvotes the report and
+            removes the spot from the map so others know it&apos;s taken.
           </span>
           <label className="btn btn-primary" style={{ display: "inline-block" }}>
-            {uploadingPhoto ? "Checking photo…" : "Take / choose photo"}
+            {uploadingPhoto ? "Uploading photo…" : "Take / choose photo"}
             <input
               type="file"
               accept="image/*"
@@ -365,6 +369,21 @@ export default function Home() {
           <button className="btn btn-ghost" onClick={cancelClaim} disabled={uploadingPhoto}>
             Cancel
           </button>
+        </section>
+      )}
+
+      {claimSuccess && (
+        <section
+          className="card fade-in"
+          style={{
+            background: "var(--green-soft)",
+            border: "1.5px solid var(--green)",
+            color: "var(--green)",
+            fontWeight: 600,
+            textAlign: "center",
+          }}
+        >
+          {claimSuccess}
         </section>
       )}
 
