@@ -47,15 +47,6 @@ function statusPill(status: "pending" | "verified" | "disputed") {
   return { label: "Pending", bg: "#eef2f7", color: "var(--text-soft)" };
 }
 
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve((reader.result as string).split(",")[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
 export default function Home() {
   const [session, setSession] = useState<Session | null>(null);
   const [score, setScore] = useState<number | null>(null);
@@ -244,28 +235,6 @@ export default function Home() {
     setUploadingPhoto(true);
     setClaimError(null);
     try {
-      const base64 = await fileToBase64(file);
-      const verifyRes = await fetch("/api/verify-photo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image: base64,
-          mimeType: file.type || "image/jpeg",
-          voterId: userId,
-        }),
-      });
-      const verification = await verifyRes.json();
-
-      if (!verification.valid) {
-        setClaimError(
-          `That doesn't look like a valid parking spot${
-            verification.reason ? `: ${verification.reason}` : ""
-          }. -1 credibility.`
-        );
-        await refreshScore();
-        return;
-      }
-
       const path = `${reportId}/${userId}-${Date.now()}.jpg`;
       const { error: uploadError } = await supabase.storage
         .from(PHOTO_BUCKET)
@@ -286,7 +255,7 @@ export default function Home() {
       await loadReports(location);
       setClaimingReportId(null);
     } catch {
-      setClaimError("Couldn't verify that photo. Try again.");
+      setClaimError("Couldn't upload that photo. Try again.");
     } finally {
       setUploadingPhoto(false);
     }
