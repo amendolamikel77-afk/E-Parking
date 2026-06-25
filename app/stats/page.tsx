@@ -44,16 +44,36 @@ export default function StatsPage() {
   }, []);
 
   return (
-    <main style={{ padding: "2rem", maxWidth: 480, margin: "0 auto" }}>
-      <h1>Stats</h1>
+    <main className="app-shell fade-in">
+      <header className="topbar">
+        <span className="brand">
+          <span className="brand-mark">P</span>
+          Stats
+        </span>
+      </header>
+
       {!stats ? (
-        <p>Loading...</p>
+        <section className="card">
+          <p className="empty">Loading…</p>
+        </section>
       ) : (
-        <ul>
-          <li>Total reports (all time): {stats.totalReports}</li>
-          <li>Reports in the last 7 days: {stats.reportsLast7Days}</li>
-          <li>Unique reporters in the last 7 days: {stats.uniqueReporters}</li>
-        </ul>
+        <section className="card">
+          <h2 className="card-title">Experiment progress</h2>
+          <div className="stat-grid">
+            <div>
+              <div className="stat-num">{stats.totalReports}</div>
+              <div className="stat-label">Total reports</div>
+            </div>
+            <div>
+              <div className="stat-num">{stats.reportsLast7Days}</div>
+              <div className="stat-label">Last 7 days</div>
+            </div>
+            <div>
+              <div className="stat-num">{stats.uniqueReporters}</div>
+              <div className="stat-label">Reporters (7d)</div>
+            </div>
+          </div>
+        </section>
       )}
     </main>
   );

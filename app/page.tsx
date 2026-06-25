@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { getLastSubmitAt, setLastSubmitAt } from "@/lib/device";
 import { distanceMeters, formatDistance } from "@/lib/distance";
 import { fetchVoteCounts, fetchMyVotedReportIds, reportStatus, VoteCounts } from "@/lib/votes";
+import { credibilityOutOf10, credibilityColor } from "@/lib/credibility";
 
 const Map = dynamic(() => import("./Map"), { ssr: false });
 
@@ -33,24 +35,12 @@ function minutesAgo(isoDate: string) {
   return `${minutes} min ago`;
 }
 
-function statusColor(status: "pending" | "verified" | "disputed") {
-  if (status === "verified") return "#2e7d32";
-  if (status === "disputed") return "#c62828";
-  return "#999";
-}
-
-// Map the unbounded raw reliability score to a 0–10 credibility rating.
-// New users start at 5/10; each net vote shifts them ±0.5, clamped to [0, 10].
-function credibilityOutOf10(rawScore: number | null) {
-  if (rawScore == null) return null;
-  const value = 5 + rawScore * 0.5;
-  return Math.min(Math.max(value, 0), 10);
-}
-
-function credibilityColor(score: number) {
-  if (score >= 7) return "#2e7d32";
-  if (score >= 4) return "#f9a825";
-  return "#c62828";
+function statusPill(status: "pending" | "verified" | "disputed") {
+  if (status === "verified")
+    return { label: "Verified", bg: "var(--green-soft)", color: "var(--green)" };
+  if (status === "disputed")
+    return { label: "Disputed", bg: "var(--red-soft)", color: "var(--red)" };
+  return { label: "Pending", bg: "#eef2f7", color: "var(--text-soft)" };
 }
 
 export default function Home() {
@@ -173,10 +163,6 @@ export default function Home() {
     });
   }
 
-  async function signOut() {
-    await supabase.auth.signOut();
-  }
-
   const onCooldown = cooldownUntil != null && Date.now() < cooldownUntil;
 
   async function submitReport(status: "free" | "taken") {
@@ -233,301 +219,196 @@ export default function Home() {
   const initial = displayName ? displayName.charAt(0).toUpperCase() : "?";
 
   return (
-    <main style={{ padding: "2rem", maxWidth: 480, margin: "0 auto" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          marginBottom: "1rem",
-        }}
-      >
-        <h1 style={{ margin: 0 }}>ParkQuest</h1>
+    <main className="app-shell">
+      <header className="topbar">
+        <span className="brand">
+          <span className="brand-mark">P</span>
+          ParkQuest
+        </span>
 
         {session ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Link href="/profile" className="chip">
+            {credibility != null && (
+              <span
+                className="chip-score"
+                style={{ color: credibilityColor(credibility) }}
+              >
+                {credibility.toFixed(1)}
+              </span>
+            )}
             {avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={avatarUrl}
-                alt={displayName}
-                width={36}
-                height={36}
-                style={{ borderRadius: "50%" }}
-              />
+              <img src={avatarUrl} alt={displayName} className="avatar" />
             ) : (
-              <div
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: "50%",
-                  background: "#1976d2",
-                  color: "white",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontWeight: 600,
-                }}
-              >
-                {initial}
-              </div>
+              <span className="avatar avatar-fallback">{initial}</span>
             )}
-            <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2 }}>
-              <span
-                style={{
-                  fontWeight: 700,
-                  fontSize: "0.95rem",
-                  color: credibility != null ? credibilityColor(credibility) : "#555",
-                }}
-              >
-                {credibility != null ? credibility.toFixed(1) : "…"}
-                <span style={{ fontWeight: 400, color: "#999", fontSize: "0.75rem" }}>
-                  {" "}
-                  / 10
-                </span>
-              </span>
-              <button
-                onClick={signOut}
-                style={{
-                  fontSize: "0.7rem",
-                  background: "none",
-                  border: "none",
-                  color: "#999",
-                  padding: 0,
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
-              >
-                Sign out
-              </button>
-            </div>
-          </div>
+          </Link>
         ) : (
-          <button
-            onClick={signIn}
-            style={{
-              fontSize: "0.9rem",
-              padding: "0.5rem 1rem",
-              border: "1px solid #ccc",
-              borderRadius: 6,
-              background: "white",
-              cursor: "pointer",
-            }}
-          >
-            Sign in with Google
+          <button onClick={signIn} className="btn btn-ghost">
+            Sign in
           </button>
         )}
-      </div>
+      </header>
 
-      <input
-        value={location}
-        onChange={(e) => changeLocation(e.target.value)}
-        placeholder="Location name (e.g. Main St Lot)"
-        style={{
-          display: "block",
-          width: "100%",
-          padding: "0.5rem",
-          margin: "0.5rem 0",
-          textAlign: "center",
-          border: "1px solid #ccc",
-          borderRadius: 6,
-        }}
-      />
-
-      <p style={{ textAlign: "center", color: "#888", fontSize: "0.85rem" }}>
-        {userPosition
-          ? `Your position: ${userPosition.lat.toFixed(5)}, ${userPosition.lng.toFixed(5)}`
-          : locationError
-          ? `Location unavailable: ${locationError}`
-          : "Getting your location..."}
-      </p>
+      <section className="card">
+        <label className="field-label" htmlFor="location">
+          Parking area
+        </label>
+        <input
+          id="location"
+          className="input"
+          value={location}
+          onChange={(e) => changeLocation(e.target.value)}
+          placeholder="e.g. Main St Lot"
+        />
+        <p className="hint">
+          {userPosition ? (
+            <>📍 Located — {userPosition.lat.toFixed(5)}, {userPosition.lng.toFixed(5)}</>
+          ) : locationError ? (
+            <>⚠️ Location unavailable: {locationError}</>
+          ) : (
+            <>
+              <span className="spin">⏳</span> Getting your location…
+            </>
+          )}
+        </p>
+      </section>
 
       {nearbyReportToConfirm && (
-        <div
-          style={{
-            margin: "1rem 0",
-            padding: "0.75rem",
-            border: "1px solid #ffb300",
-            background: "#fff8e1",
-            borderRadius: 8,
-            textAlign: "center",
-          }}
-        >
-          <p style={{ margin: "0 0 0.5rem" }}>Did you park here?</p>
+        <section className="card prompt fade-in">
+          <strong>Did you park here?</strong>
+          <span className="meta">A spot was reported within {NEARBY_RADIUS_METERS}m of you.</span>
+          <div className="prompt-actions">
+            <button
+              className="btn btn-primary"
+              onClick={() => confirmParkedHere(nearbyReportToConfirm.id)}
+            >
+              Yes, I parked
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => dismissParkedPrompt(nearbyReportToConfirm.id)}
+            >
+              No
+            </button>
+          </div>
+        </section>
+      )}
+
+      <section className="card">
+        <div className="report-actions">
           <button
-            onClick={() => confirmParkedHere(nearbyReportToConfirm.id)}
-            style={{
-              marginRight: 8,
-              padding: "0.4rem 0.8rem",
-              border: "none",
-              borderRadius: 6,
-              background: "#2e7d32",
-              color: "white",
-              cursor: "pointer",
-            }}
+            className="btn btn-report btn-free"
+            onClick={() => submitReport("free")}
+            disabled={!userId || submitting || onCooldown}
           >
-            Yes
+            <span className="emoji">🅿️</span>
+            Spot Free
           </button>
           <button
-            onClick={() => dismissParkedPrompt(nearbyReportToConfirm.id)}
-            style={{
-              padding: "0.4rem 0.8rem",
-              border: "1px solid #ccc",
-              borderRadius: 6,
-              background: "white",
-              cursor: "pointer",
-            }}
+            className="btn btn-report btn-taken"
+            onClick={() => submitReport("taken")}
+            disabled={!userId || submitting || onCooldown}
           >
-            No
+            <span className="emoji">🚗</span>
+            Spot Taken
           </button>
         </div>
-      )}
-
-      <div style={{ display: "flex", gap: "1rem", margin: "2rem 0" }}>
-        <button
-          onClick={() => submitReport("free")}
-          disabled={!userId || submitting || onCooldown}
-          style={{
-            flex: 1,
-            padding: "1rem",
-            fontSize: "1.1rem",
-            background: "#2e7d32",
-            color: "white",
-            border: "none",
-            borderRadius: 8,
-            opacity: !userId || onCooldown ? 0.5 : 1,
-          }}
-        >
-          Spot Free
-        </button>
-        <button
-          onClick={() => submitReport("taken")}
-          disabled={!userId || submitting || onCooldown}
-          style={{
-            flex: 1,
-            padding: "1rem",
-            fontSize: "1.1rem",
-            background: "#c62828",
-            color: "white",
-            border: "none",
-            borderRadius: 8,
-            opacity: !userId || onCooldown ? 0.5 : 1,
-          }}
-        >
-          Spot Taken
-        </button>
-      </div>
-      {!userId && (
-        <p style={{ textAlign: "center", color: "#888", fontSize: "0.8rem" }}>
-          Sign in to report a spot.
-        </p>
-      )}
-      {userId && onCooldown && (
-        <p style={{ textAlign: "center", color: "#888", fontSize: "0.8rem" }}>
-          You just reported here — try again in a minute.
-        </p>
-      )}
+        {!userId && <p className="hint" style={{ textAlign: "center" }}>Sign in to report a spot.</p>}
+        {userId && onCooldown && (
+          <p className="hint" style={{ textAlign: "center" }}>
+            You just reported here — try again in a minute.
+          </p>
+        )}
+      </section>
 
       {userPosition && (
-        <div style={{ marginBottom: "1.5rem" }}>
+        <div className="map-wrap fade-in">
           <Map userPosition={userPosition} reports={reports} userId={userId} />
         </div>
       )}
 
       {userId && myReports.length > 0 && (
-        <>
-          <h2 style={{ fontSize: "1rem", color: "#555" }}>My recent reports</h2>
-          <ul style={{ listStyle: "none", padding: 0, marginBottom: "1.5rem" }}>
-            {myReports.map((r) => {
-              const status = reportStatus(myReportVoteCounts[r.id]);
-              return (
-                <li
-                  key={r.id}
-                  style={{
-                    padding: "0.5rem",
-                    marginBottom: 6,
-                    borderRadius: 6,
-                    background: `${statusColor(status)}1a`,
-                    borderLeft: `4px solid ${statusColor(status)}`,
-                  }}
-                >
-                  {r.status === "free" ? "🟢 Free" : "🔴 Taken"} — {minutesAgo(r.created_at)} —{" "}
-                  <strong style={{ color: statusColor(status) }}>{status}</strong>
-                </li>
-              );
-            })}
-          </ul>
-        </>
+        <section className="card">
+          <h2 className="card-title">My recent reports</h2>
+          {myReports.map((r) => {
+            const status = reportStatus(myReportVoteCounts[r.id]);
+            const pill = statusPill(status);
+            return (
+              <div key={r.id} className="report-item">
+                <div className="report-row">
+                  <span className="badge">
+                    {r.status === "free" ? "🟢 Free" : "🔴 Taken"}
+                  </span>
+                  <span className="meta">{minutesAgo(r.created_at)}</span>
+                  <span
+                    className="status-pill"
+                    style={{ background: pill.bg, color: pill.color, marginLeft: "auto" }}
+                  >
+                    {pill.label}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </section>
       )}
 
-      <h2 style={{ fontSize: "1rem", color: "#555" }}>Recent reports</h2>
-      {reports.length === 0 ? (
-        <p style={{ color: "#888" }}>No reports in the last 10 minutes.</p>
-      ) : (
-        <ul style={{ listStyle: "none", padding: 0 }}>
-          {reports.map((r) => {
+      <section className="card">
+        <h2 className="card-title">Recent reports nearby</h2>
+        {reports.length === 0 ? (
+          <p className="empty">No reports in the last 10 minutes.</p>
+        ) : (
+          reports.map((r) => {
             const isMine = r.user_id != null && r.user_id === userId;
             const counts = voteCounts[r.id];
             const alreadyVoted = myVotedIds.has(r.id);
             return (
-              <li
-                key={r.id}
-                style={{
-                  padding: "0.5rem 0",
-                  borderBottom: "1px solid #eee",
-                }}
-              >
-                <div>
-                  {r.status === "free" ? "🟢 Free" : "🔴 Taken"} — {minutesAgo(r.created_at)}
-                  {isMine && <span style={{ color: "#9c27b0" }}> (you)</span>}
+              <div key={r.id} className="report-item">
+                <div className="report-row">
+                  <span className="badge">
+                    {r.status === "free" ? "🟢 Free" : "🔴 Taken"}
+                  </span>
+                  <span className="meta">{minutesAgo(r.created_at)}</span>
+                  {isMine && (
+                    <span className="status-pill" style={{ background: "var(--primary-soft)", color: "var(--primary-dark)" }}>
+                      You
+                    </span>
+                  )}
                   {userPosition && r.lat != null && r.lng != null && (
-                    <span style={{ color: "#aaa" }}>
-                      {" — "}
+                    <span className="meta" style={{ marginLeft: "auto" }}>
                       {formatDistance(distanceMeters(userPosition, { lat: r.lat, lng: r.lng }))}
                     </span>
                   )}
                 </div>
                 {counts && (counts.confirm > 0 || counts.dispute > 0) && (
-                  <div style={{ fontSize: "0.75rem", color: "#888" }}>
+                  <span className="tally">
                     👍 {counts.confirm} · 👎 {counts.dispute}
-                  </div>
+                  </span>
                 )}
                 {userId && !isMine && (
-                  <div style={{ marginTop: 4 }}>
+                  <div className="vote-row">
                     <button
+                      className="btn-vote"
                       onClick={() => castVote(r.id, "confirm")}
                       disabled={alreadyVoted}
-                      style={{
-                        marginRight: 6,
-                        fontSize: "0.75rem",
-                        padding: "2px 8px",
-                        border: "1px solid #ccc",
-                        borderRadius: 6,
-                        background: alreadyVoted ? "#eee" : "white",
-                      }}
                     >
                       Still there 👍
                     </button>
                     <button
+                      className="btn-vote"
                       onClick={() => castVote(r.id, "dispute")}
                       disabled={alreadyVoted}
-                      style={{
-                        fontSize: "0.75rem",
-                        padding: "2px 8px",
-                        border: "1px solid #ccc",
-                        borderRadius: 6,
-                        background: alreadyVoted ? "#eee" : "white",
-                      }}
                     >
                       Not accurate 👎
                     </button>
                   </div>
                 )}
-              </li>
+              </div>
             );
-          })}
-        </ul>
-      )}
+          })
+        )}
+      </section>
     </main>
   );
 }
