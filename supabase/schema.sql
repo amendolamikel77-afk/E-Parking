@@ -19,6 +19,13 @@ create policy "Logged-in users can insert their own reports"
   on reports for insert
   with check (auth.uid() = user_id);
 
+-- Anyone logged in can flip a report from free to taken when they claim it
+-- by parking there (see the "parked_confirm" photo-claim flow below).
+create policy "Logged-in users can claim a free spot as taken"
+  on reports for update
+  using (status = 'free')
+  with check (status = 'taken');
+
 -- ---------------------------------------------------------------------------
 -- Profiles: one row per authenticated user, holding the reliability score.
 -- ---------------------------------------------------------------------------
@@ -62,6 +69,7 @@ create table report_votes (
   report_id uuid not null references reports (id) on delete cascade,
   voter_id uuid not null references auth.users (id),
   vote text not null check (vote in ('confirm', 'dispute', 'parked_confirm')),
+  photo_url text,
   created_at timestamptz not null default now(),
   unique (report_id, voter_id)
 );
@@ -105,6 +113,21 @@ create trigger on_report_vote_created
   after insert on report_votes
   for each row execute function handle_new_vote();
 
+-- ---------------------------------------------------------------------------
+-- Storage: a public bucket for "I parked here" verification photos.
+-- ---------------------------------------------------------------------------
+insert into storage.buckets (id, name, public)
+values ('parking-photos', 'parking-photos', true)
+on conflict (id) do nothing;
+
+create policy "Anyone can view parking photos"
+  on storage.objects for select
+  using (bucket_id = 'parking-photos');
+
+create policy "Logged-in users can upload parking photos"
+  on storage.objects for insert
+  with check (bucket_id = 'parking-photos' and auth.uid() is not null);
+
 -- ===========================================================================
 -- Migrations for tables created before these columns/objects existed.
 -- Run only the lines you still need.
@@ -132,3 +155,19 @@ create trigger on_report_vote_created
 --   check (vote in ('confirm', 'dispute', 'parked_confirm'));
 -- -- Then re-run "create or replace function handle_new_vote" with the updated
 -- -- delta logic above (CREATE OR REPLACE is safe to re-run).
+--
+-- -- For the "Parked here" photo-claim feature:
+-- alter table report_votes add column photo_url text;
+-- create policy "Logged-in users can claim a free spot as taken"
+--   on reports for update
+--   using (status = 'free')
+--   with check (status = 'taken');
+-- insert into storage.buckets (id, name, public)
+-- values ('parking-photos', 'parking-photos', true)
+-- on conflict (id) do nothing;
+-- create policy "Anyone can view parking photos"
+--   on storage.objects for select
+--   using (bucket_id = 'parking-photos');
+-- create policy "Logged-in users can upload parking photos"
+--   on storage.objects for insert
+--   with check (bucket_id = 'parking-photos' and auth.uid() is not null);

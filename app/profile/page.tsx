@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { fetchVoteCounts, reportStatus, VoteCounts } from "@/lib/votes";
@@ -85,9 +86,12 @@ export default function ProfilePage() {
     return (
       <main className="app-shell">
         <header className="topbar">
+          <Link href="/" className="btn btn-ghost" aria-label="Back to home">
+            ← Back
+          </Link>
           <span className="brand">
-            <span className="brand-mark">P</span>
             Profile
+            <span className="brand-mark">P</span>
           </span>
         </header>
         <section className="card" style={{ textAlign: "center" }}>

@@ -16,7 +16,7 @@ const DEFAULT_LOCATION = "Main St Lot";
 const LOCATION_STORAGE_KEY = "parkquest_location";
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 const THROTTLE_MS = 60 * 1000;
-const NEARBY_RADIUS_METERS = 30;
+const PHOTO_BUCKET = "parking-photos";
 
 type Report = {
   id: string;
@@ -56,7 +56,9 @@ export default function Home() {
   const [userPosition, setUserPosition] = useState<UserPosition | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
-  const [dismissedParkIds, setDismissedParkIds] = useState<Set<string>>(new Set());
+  const [claimingReportId, setClaimingReportId] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
 
   const userId = session?.user.id ?? null;
 
@@ -165,11 +167,11 @@ export default function Home() {
 
   const onCooldown = cooldownUntil != null && Date.now() < cooldownUntil;
 
-  async function submitReport(status: "free" | "taken") {
+  async function submitReport() {
     if (!userId || onCooldown) return;
     setSubmitting(true);
     await supabase.from("reports").insert({
-      status,
+      status: "free",
       location_label: location,
       lat: userPosition?.lat ?? null,
       lng: userPosition?.lng ?? null,
@@ -190,26 +192,45 @@ export default function Home() {
     setVoteCounts(await fetchVoteCounts(reports.map((r) => r.id)));
   }
 
-  const nearbyReportToConfirm =
-    userId && userPosition
-      ? reports.find(
-          (r) =>
-            r.lat != null &&
-            r.lng != null &&
-            r.user_id !== userId &&
-            !myVotedIds.has(r.id) &&
-            !dismissedParkIds.has(r.id) &&
-            distanceMeters(userPosition, { lat: r.lat, lng: r.lng }) <= NEARBY_RADIUS_METERS
-        ) ?? null
-      : null;
-
-  async function confirmParkedHere(reportId: string) {
-    await castVote(reportId, "parked_confirm");
-    setDismissedParkIds((prev) => new Set(prev).add(reportId));
+  function startClaim(reportId: string) {
+    setClaimError(null);
+    setClaimingReportId(reportId);
   }
 
-  function dismissParkedPrompt(reportId: string) {
-    setDismissedParkIds((prev) => new Set(prev).add(reportId));
+  function cancelClaim() {
+    setClaimingReportId(null);
+    setClaimError(null);
+  }
+
+  async function submitClaimPhoto(reportId: string, file: File) {
+    if (!userId) return;
+    setUploadingPhoto(true);
+    setClaimError(null);
+    try {
+      const path = `${reportId}/${userId}-${Date.now()}.jpg`;
+      const { error: uploadError } = await supabase.storage
+        .from(PHOTO_BUCKET)
+        .upload(path, file, { contentType: file.type || "image/jpeg" });
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+
+      await supabase.from("report_votes").insert({
+        report_id: reportId,
+        voter_id: userId,
+        vote: "parked_confirm",
+        photo_url: publicUrlData.publicUrl,
+      });
+      await supabase.from("reports").update({ status: "taken" }).eq("id", reportId);
+
+      setMyVotedIds((prev) => new Set(prev).add(reportId));
+      await loadReports(location);
+      setClaimingReportId(null);
+    } catch {
+      setClaimError("Couldn't verify that photo. Try again.");
+    } finally {
+      setUploadingPhoto(false);
+    }
   }
 
   const credibility = credibilityOutOf10(score);
@@ -274,44 +295,42 @@ export default function Home() {
         </p>
       </section>
 
-      {nearbyReportToConfirm && (
+      {claimingReportId && (
         <section className="card prompt fade-in">
-          <strong>Did you park here?</strong>
-          <span className="meta">A spot was reported within {NEARBY_RADIUS_METERS}m of you.</span>
-          <div className="prompt-actions">
-            <button
-              className="btn btn-primary"
-              onClick={() => confirmParkedHere(nearbyReportToConfirm.id)}
-            >
-              Yes, I parked
-            </button>
-            <button
-              className="btn btn-ghost"
-              onClick={() => dismissParkedPrompt(nearbyReportToConfirm.id)}
-            >
-              No
-            </button>
-          </div>
+          <strong>📷 Confirm you parked here</strong>
+          <span className="meta">
+            Take a quick photo to verify the spot — this gives the reporter credibility points.
+          </span>
+          <label className="btn btn-primary" style={{ display: "inline-block" }}>
+            {uploadingPhoto ? "Uploading…" : "Take / choose photo"}
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              style={{ display: "none" }}
+              disabled={uploadingPhoto}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) submitClaimPhoto(claimingReportId, file);
+              }}
+            />
+          </label>
+          {claimError && <span style={{ color: "var(--red)", fontSize: "0.85rem" }}>{claimError}</span>}
+          <button className="btn btn-ghost" onClick={cancelClaim} disabled={uploadingPhoto}>
+            Cancel
+          </button>
         </section>
       )}
 
       <section className="card">
-        <div className="report-actions">
+        <div className="report-actions" style={{ gridTemplateColumns: "1fr" }}>
           <button
             className="btn btn-report btn-free"
-            onClick={() => submitReport("free")}
+            onClick={() => submitReport()}
             disabled={!userId || submitting || onCooldown}
           >
             <span className="emoji">🅿️</span>
             Spot Free
-          </button>
-          <button
-            className="btn btn-report btn-taken"
-            onClick={() => submitReport("taken")}
-            disabled={!userId || submitting || onCooldown}
-          >
-            <span className="emoji">🚗</span>
-            Spot Taken
           </button>
         </div>
         {!userId && <p className="hint" style={{ textAlign: "center" }}>Sign in to report a spot.</p>}
@@ -388,13 +407,16 @@ export default function Home() {
                 )}
                 {userId && !isMine && (
                   <div className="vote-row">
-                    <button
-                      className="btn-vote"
-                      onClick={() => castVote(r.id, "confirm")}
-                      disabled={alreadyVoted}
-                    >
-                      Still there 👍
-                    </button>
+                    {r.status === "free" && (
+                      <button
+                        className="btn-vote"
+                        style={{ color: "var(--primary-dark)", borderColor: "var(--primary)" }}
+                        onClick={() => startClaim(r.id)}
+                        disabled={alreadyVoted}
+                      >
+                        📷 Parked here
+                      </button>
+                    )}
                     <button
                       className="btn-vote"
                       onClick={() => castVote(r.id, "dispute")}
