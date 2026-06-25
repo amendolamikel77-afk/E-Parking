@@ -27,11 +27,11 @@ export default function StatsPage() {
 
       const { data: reporterRows } = await supabase
         .from("reports")
-        .select("reporter_id")
+        .select("user_id")
         .gte("created_at", sevenDaysAgo);
 
       const uniqueReporters = new Set(
-        (reporterRows ?? []).map((r) => r.reporter_id).filter(Boolean)
+        (reporterRows ?? []).map((r) => r.user_id).filter(Boolean)
       ).size;
 
       setStats({

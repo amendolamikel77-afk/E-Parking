@@ -43,13 +43,13 @@ type Report = {
   created_at: string;
   lat: number | null;
   lng: number | null;
-  reporter_id: string | null;
+  user_id: string | null;
 };
 
 type Props = {
   userPosition: { lat: number; lng: number };
   reports: Report[];
-  deviceId: string | null;
+  userId: string | null;
 };
 
 function minutesAgo(isoDate: string) {
@@ -58,7 +58,7 @@ function minutesAgo(isoDate: string) {
   return `${minutes} min ago`;
 }
 
-export default function Map({ userPosition, reports, deviceId }: Props) {
+export default function Map({ userPosition, reports, userId }: Props) {
   return (
     <MapContainer
       center={[userPosition.lat, userPosition.lng]}
@@ -79,11 +79,15 @@ export default function Map({ userPosition, reports, deviceId }: Props) {
           <Marker
             key={r.id}
             position={[r.lat as number, r.lng as number]}
-            icon={reportIcon(r.status, r.created_at, r.reporter_id === deviceId)}
+            icon={reportIcon(
+              r.status,
+              r.created_at,
+              r.user_id != null && r.user_id === userId
+            )}
           >
             <Popup>
               {r.status === "free" ? "Free" : "Taken"} — {minutesAgo(r.created_at)}
-              {r.reporter_id === deviceId && " (you)"}
+              {r.user_id != null && r.user_id === userId && " (you)"}
             </Popup>
           </Marker>
         ))}
