@@ -15,7 +15,7 @@ const Map = dynamic(() => import("./Map"), { ssr: false });
 
 const DEFAULT_LOCATION = "Main St Lot";
 const LOCATION_STORAGE_KEY = "parkquest_location";
-const REPORT_LIFETIME_MS = 60 * 1000;
+const REPORT_LIFETIME_MS = 30 * 60 * 1000;
 const THROTTLE_MS = 60 * 1000;
 const PHOTO_BUCKET = "parking-photos";
 
