@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -59,30 +58,6 @@ function minutesAgo(isoDate: string) {
   return `${minutes} min ago`;
 }
 
-function FitBounds({
-  userPosition,
-  reports,
-}: {
-  userPosition: { lat: number; lng: number };
-  reports: Report[];
-}) {
-  const map = useMap();
-
-  useEffect(() => {
-    const points: [number, number][] = [[userPosition.lat, userPosition.lng]];
-    for (const r of reports) {
-      if (r.lat != null && r.lng != null) points.push([r.lat, r.lng]);
-    }
-    if (points.length === 1) {
-      map.setView(points[0], 16);
-    } else {
-      map.fitBounds(L.latLngBounds(points), { padding: [40, 40], maxZoom: 16 });
-    }
-  }, [map, userPosition, reports]);
-
-  return null;
-}
-
 export default function Map({ userPosition, reports, deviceId }: Props) {
   return (
     <MapContainer
@@ -95,7 +70,6 @@ export default function Map({ userPosition, reports, deviceId }: Props) {
         attribution='&copy; OpenStreetMap contributors'
         maxZoom={19}
       />
-      <FitBounds userPosition={userPosition} reports={reports} />
       <Marker position={[userPosition.lat, userPosition.lng]} icon={userIcon}>
         <Popup>You</Popup>
       </Marker>
