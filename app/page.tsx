@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
@@ -68,7 +68,19 @@ export default function Home() {
     {}
   );
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [mapFocus, setMapFocus] = useState<{ lat: number; lng: number; key: number } | null>(null);
+  const mapWrapRef = useRef<HTMLDivElement | null>(null);
   const [, forceTick] = useState(0);
+
+  function focusReportOnMap(r: Report) {
+    if (r.lat == null || r.lng == null) {
+      // No coordinates to fly to — fall back to opening the details.
+      setSelectedReportId(r.id);
+      return;
+    }
+    setMapFocus({ lat: r.lat, lng: r.lng, key: Date.now() });
+    mapWrapRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
 
   const userId = session?.user.id ?? null;
 
@@ -411,7 +423,7 @@ export default function Home() {
       </section>
 
       {userPosition && (
-        <div className="map-wrap fade-in">
+        <div className="map-wrap fade-in" ref={mapWrapRef}>
           <Map
             userPosition={userPosition}
             reports={reports}
@@ -419,6 +431,7 @@ export default function Home() {
             reporterCredibility={reporterCredibility}
             lifetimeMs={REPORT_LIFETIME_MS}
             onSelectReport={setSelectedReportId}
+            focus={mapFocus}
           />
         </div>
       )}
@@ -465,7 +478,7 @@ export default function Home() {
               <div
                 key={r.id}
                 className="report-item"
-                onClick={() => setSelectedReportId(r.id)}
+                onClick={() => focusReportOnMap(r)}
                 style={{ cursor: "pointer" }}
               >
                 <div className="report-row">

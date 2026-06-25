@@ -1,9 +1,19 @@
 "use client";
 
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { useEffect } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { credibilityColor } from "@/lib/credibility";
+
+// Pans/zooms the map whenever `focus` changes (e.g. a report row is clicked).
+function MapFocus({ focus }: { focus: { lat: number; lng: number; key: number } | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (focus) map.flyTo([focus.lat, focus.lng], 18, { duration: 0.8 });
+  }, [focus, map]);
+  return null;
+}
 
 const userIcon = new L.Icon({
   iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
@@ -63,6 +73,7 @@ type Props = {
   reporterCredibility: Record<string, number | null>;
   lifetimeMs: number;
   onSelectReport: (reportId: string) => void;
+  focus: { lat: number; lng: number; key: number } | null;
 };
 
 function ageLabel(isoDate: string) {
@@ -79,6 +90,7 @@ export default function Map({
   reporterCredibility,
   lifetimeMs,
   onSelectReport,
+  focus,
 }: Props) {
   return (
     <MapContainer
@@ -86,6 +98,7 @@ export default function Map({
       zoom={16}
       style={{ height: 440, width: "100%" }}
     >
+      <MapFocus focus={focus} />
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         attribution='&copy; OpenStreetMap contributors'
