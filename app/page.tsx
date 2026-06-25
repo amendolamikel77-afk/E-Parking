@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabase";
+
+const Map = dynamic(() => import("./Map"), { ssr: false });
 
 const LOCATION = "Main St Lot";
 const TEN_MINUTES_MS = 10 * 60 * 1000;
@@ -118,6 +121,12 @@ export default function Home() {
           Spot Taken
         </button>
       </div>
+
+      {userPosition && (
+        <div style={{ marginBottom: "1.5rem" }}>
+          <Map userPosition={userPosition} reports={reports} />
+        </div>
+      )}
 
       <h2 style={{ fontSize: "1rem", color: "#555" }}>Recent reports</h2>
       {reports.length === 0 ? (
