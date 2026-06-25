@@ -10,6 +10,8 @@ type Report = {
   id: string;
   status: "free" | "taken";
   created_at: string;
+  lat: number | null;
+  lng: number | null;
 };
 
 function minutesAgo(isoDate: string) {
@@ -48,7 +50,7 @@ export default function Home() {
     const cutoff = new Date(Date.now() - TEN_MINUTES_MS).toISOString();
     const { data } = await supabase
       .from("reports")
-      .select("id, status, created_at")
+      .select("id, status, created_at, lat, lng")
       .eq("location_label", LOCATION)
       .gte("created_at", cutoff)
       .order("created_at", { ascending: false })
@@ -62,7 +64,12 @@ export default function Home() {
 
   async function submitReport(status: "free" | "taken") {
     setSubmitting(true);
-    await supabase.from("reports").insert({ status, location_label: LOCATION });
+    await supabase.from("reports").insert({
+      status,
+      location_label: LOCATION,
+      lat: userPosition?.lat ?? null,
+      lng: userPosition?.lng ?? null,
+    });
     await loadReports();
     setSubmitting(false);
   }
@@ -126,6 +133,12 @@ export default function Home() {
               }}
             >
               {r.status === "free" ? "🟢 Free" : "🔴 Taken"} — {minutesAgo(r.created_at)}
+              {r.lat != null && r.lng != null && (
+                <span style={{ color: "#aaa" }}>
+                  {" "}
+                  ({r.lat.toFixed(5)}, {r.lng.toFixed(5)})
+                </span>
+              )}
             </li>
           ))}
         </ul>
