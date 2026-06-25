@@ -75,6 +75,11 @@ export default function Home() {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
+      // Strip any leftover OAuth tokens/code from the URL so a retry can't
+      // choke on stale auth params.
+      if (s && (window.location.hash.includes("access_token") || window.location.search.includes("code="))) {
+        window.history.replaceState({}, "", window.location.pathname);
+      }
     });
     return () => sub.subscription.unsubscribe();
   }, []);

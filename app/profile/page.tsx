@@ -37,7 +37,12 @@ export default function ProfilePage() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+      if (s && (window.location.hash.includes("access_token") || window.location.search.includes("code="))) {
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    });
     return () => sub.subscription.unsubscribe();
   }, []);
 
